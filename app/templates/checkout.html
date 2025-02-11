@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Shipay Super Simple Checkout Page</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        body {
+            background: #e9ecef;
+        }
+
+        .wallet-card {
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .wallet-card:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .wallet-selected {
+            border: 2px solid #28a745;
+        }
+
+        #confirmationMessage {
+            font-size: 1.8rem;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <a class="navbar-brand" href="#">
+            <img src="/static/logo.png" alt="Cactus Gaming Logo" class="d-inline-block align-top"
+                style="max-height:50px;">
+            <span class="ml-2"></span>
+        </a>
+    </nav>
+
+    <div class="container mt-4">
+        {% if not order %}
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card shadow">
+                    <div class="card-header text-center">
+                        <h4>Shipay Super Simple Checkout Page</h4>
+                    </div>
+                    <div class="card-body">
+                        <form method="post" action="/create_order" onsubmit="return validateWalletSelection()">
+                            <div class="form-group">
+                                <label for="amount">Valor da Cobrança:</label>
+                                <input type="number" class="form-control" id="amount" name="amount" step="0.01"
+                                    min="0.01" pattern="\d+(\.\d{2})?"
+                                    onkeydown="return event.keyCode !== 69 && event.keyCode !== 189" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Selecione a carteira:</label>
+                                <div class="row">
+                                    {% for w in wallets %}
+                                    {% if w.active %}
+                                    {% set display_name = w.friendly_name %}
+                                    {% if w.friendly_name|lower == "pix" and w.pix_psp %}
+                                    {% set display_name = "Pix " ~ w.pix_psp %}
+                                    {% endif %}
+                                    <div class="col-md-4 mb-3">
+                                        <div class="card wallet-card" onclick="selectWallet('{{ w.wallet }}', this)">
+                                            <div class="card-body text-center">
+                                                <img src="{{ w.logo }}" alt="{{ display_name }} Logo"
+                                                    class="img-fluid mb-2" style="max-height:50px;">
+                                                <h5 class="card-title">{{ display_name }}</h5>
+                                                <p class="card-text">Mínimo: R$ {{ w.minimum_payment }}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                    {% endfor %}
+                                </div>
+                                <input type="hidden" name="wallet" id="wallet">
+                            </div>
+                            <button type="submit" class="btn btn-success btn-block">Gerar QR Code</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card shadow">
+                    <div class="card-header text-center">
+                        <h4>Pagamento</h4>
+                    </div>
+                    <div class="card-body text-center">
+                        <p><strong>UUID do pagamento:</strong> {{ order.order_id }}</p>
+
+                        <img src="{{ order.qr_code }}" alt="QR Code" class="img-fluid mb-3" style="width: 250px;">
+
+                        <div class="row">
+                            <div class="col-md-12">
+                                <p class="font-weight-bold mb-2">Formas de pagamento:</p>
+                                <p class="mb-3">
+                                    1. Escaneie o QR Code com o app do seu banco<br>
+                                    2. Ou use o código Pix abaixo para colar no seu app
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="input-group mb-3">
+                            <input type="text" class="form-control" id="qrText" value="{{ order.qr_code_text }}"
+                                readonly>
+                            <div class="input-group-append">
+                                <button class="btn btn-outline-secondary" type="button"
+                                    onclick="copyText()">Copiar</button>
+                            </div>
+                        </div>
+
+                        <p id="timerContainer"><strong>Tempo restante:</strong> <span id="timer"></span></p>
+
+                        <div id="paymentStatus" class="mt-3">
+                            {% if paid %}
+                            <div id="confirmationMessage" class="alert alert-success" role="alert">
+                                Cobrança paga com sucesso!
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            var timeLeft = {{ timer }};
+            function updateTimer() {
+                var minutes = Math.floor(timeLeft / 60);
+                var seconds = timeLeft % 60;
+                document.getElementById("timer").innerText = minutes + "m " + seconds + "s";
+                if (timeLeft > 0) {
+                    timeLeft--;
+                    setTimeout(updateTimer, 1000);
+                }
+            }
+            updateTimer();
+
+            function copyText() {
+                var text = document.getElementById("qrText").value;
+                navigator.clipboard.writeText(text);
+            }
+
+            function checkStatus() {
+                fetch("/order_status/{{ order.order_id }}")
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === "approved") {
+                            document.getElementById("paymentStatus").innerHTML = '<div id="confirmationMessage" class="alert alert-success" role="alert">Pedido pago com sucesso!</div>';
+                            document.getElementById("timerContainer").style.display = "none";
+                        } else {
+                            setTimeout(checkStatus, 5000);
+                        }
+                    });
+            }
+            checkStatus();
+        </script>
+        {% endif %}
+    </div>
+
+    <footer class="footer mt-5 py-3 bg-light">
+        <div class="container text-center">
+            <img src="/static/shipaylogo.png" alt="Shipay Logo" class="mb-2" style="max-height:30px;">
+            <br>
+            <span class="text-muted">Shipay Integration - </span>
+        </div>
+    </footer>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        var selectedWalletCard = null;
+        function selectWallet(wallet, element) {
+            document.getElementById("wallet").value = wallet;
+            if (selectedWalletCard) {
+                selectedWalletCard.classList.remove("wallet-selected");
+            }
+            element.classList.add("wallet-selected");
+            selectedWalletCard = element;
+        }
+
+        function validateWalletSelection() {
+            var wallet = document.getElementById("wallet").value;
+            if (wallet === "") {
+                alert("Por favor, selecione uma das carteiras disponiveis para processar o pagamento.");
+                return false;
+            }
+            return true;
+        }
+    </script>
+</body>
+
+</html>
